@@ -7,19 +7,6 @@ def get_id(id_dict, val):
         return 0
     return id_dict[val]
 
-def get_date_interval(days_info):
-    days_info = days_info.split(';')
-    day_list = []
-    for x in days_info:
-        x, _ = x.split(':')
-        day_list.append(x)
-    day_list.sort()
-    ret = {}
-    for x in day_list:
-        if x not in ret:
-            ret[x] = len(ret)
-    return ret
-
 # dict list
 effect_dict = {}
 adgroup_dict = {}
@@ -32,12 +19,18 @@ cate_dict = {}
 commodity_dict = {}
 node_dict = {}
 
+# handle days
+# set
+tmp_days_set = set()
+# dict list
+days_dict = {}
+
 def getData(
         file='ad_action_state',
-        batch_size=128,
+        batch_size=32,
         shuffle_each_epoch=True,
     ):
-    df = pd.read_csv(file, sep='$')
+    df = pd.read_csv(file)
 
     df['adgroup_id'] = pd.Series(df['adgroup_id'], dtype=np.str)
 
@@ -50,6 +43,8 @@ def getData(
         effect_info = row['effect_data'].split(';')
         for s in effect_info:
             _, s = s.split(':')
+            if _ not in tmp_days_set:
+                tmp_days_set.add(_)
             s = s.split(',')
             for t in s:
                 t, _ = t.split('=')
@@ -102,6 +97,13 @@ def getData(
                     if num not in node_dict:
                         node_dict[num] = len(node_dict)
 
+    tmp_days_list = list(tmp_days_set)
+    list.sort(tmp_days_list)
+    for i, x in enumerate(tmp_days_list):
+        days_dict[x] = i
+
+    print(days_dict)    
+
     train_set = []
     test_set = []
 
@@ -111,7 +113,7 @@ def getData(
         
         # label
         data.append(row['label'])
-        data.append(row['label'])
+        data.append(0)
         
         # ad feature
         adgroup_id = get_id(adgroup_dict, row['adgroup_id'])
@@ -144,13 +146,11 @@ def getData(
                 fid = get_id(node_dict, entry)
                 data.append(fid)
         
-        days_dict = get_date_interval(row['effect_data'])
         days_num = len(days_dict)
         
         # effect data
         effect_list = [[0.0] * len(effect_dict) for _ in range(days_num)]
         effect_data = row['effect_data'].split(';')
-        mmin = np.array([1000000000.0 for i in range(len(effect_dict))])
         mmax = np.array([0.0 for i in range(len(effect_dict))])
         for x in effect_data:
             day, entry = x.split(':')
@@ -162,14 +162,17 @@ def getData(
                 name, num = y.split('=')
                 num = float(num)
                 name = get_id(effect_dict, name)
-                mmin[o] = min(mmin[o], num)
                 mmax[o] = max(mmax[o], num)
                 effect_list[day][name] = num
+
+        tot_cost = 0
+        for x in effect_list: tot_cost += x[2]
+        data[1]=tot_cost
 
         # normalized
         for o, x in enumerate(effect_list):
             effect_arr = np.array(effect_list[o])
-            effect_arr = (effect_arr - mmin) / np.array([max(mmax[i] - mmin[i], 0.0000000001) for i in range(len(mmax))])
+            effect_arr = 2 * (effect_arr / np.array([max(mmax[i], 0.0000000001) for i in range(len(mmax))]) - 0.5)
             effect_list[o] = effect_arr.tolist()
         data.append(effect_list)
         
@@ -208,7 +211,6 @@ def getData(
         data.append(direct_list)
         data.append(direct_mask)
         
-        # sorted by time, haven't consider specific time
         # actions info
         direct_type_list = [[] for _ in range(days_num)]
         direct_val_list = [[] for _ in range(days_num)]
@@ -232,43 +234,46 @@ def getData(
                     cc = b.split('-')[0]
                     bb = float(bb) / 100.0 # old price
                     cc = float(cc) / 100.0 # new price
-                    direct_type_list[day].append(get_id(direct_dict, aa))
-                    direct_val_list[day].append(cc - bb)
+                    if len(direct_type_list[day]) < 100:
+                        direct_type_list[day].append(get_id(direct_dict, aa))
+                        #direct_val_list[day].append(1)
+                        direct_val_list[day].append(cc - bb)
                 if a == '新增定向':
                     b = b.split('-')
                     aa = b[0]
-                    if aa == '67' or aa == '66' or aa == '32' or aa == '16384':
-                        bb = b[3]
-                    else:
-                        bb = b[2]
+                    bb = b[-2]
                     bb = float(bb) / 100.0
-                    direct_type_list[day].append(len(direct_dict) + get_id(direct_dict, aa))
-                    direct_val_list[day].append(bb)
-                #if a == '移除定向':
-                #    b = b.split('-')
-                #    aa = b[0]
-                #    bb = b[2]
-                #    if aa == '67' or aa == '66' or aa == '32' or aa == '16384':
-                #        bb = b[3]
-                #    else:
-                #         bb = b[2]
-                #    bb = float(bb) / 100.0
-                #    direct_type_list[day].append(len(direct_dict) + len(direct_dict) + get_id(direct_dict, aa))
-                #    direct_val_list[day].append(bb)
+                    if len(direct_type_list[day]) < 100:
+                        direct_type_list[day].append(len(direct_dict) + get_id(direct_dict, aa))
+                        #direct_val_list[day].append(1)
+                        direct_val_list[day].append(bb)
+                if a == '移除定向':
+                    b = b.split('-')
+                    aa = b[0]
+                    bb = b[-2]
+                    bb = float(bb) / 100.0
+                    if len(direct_type_list[day]) < 100:
+                        direct_type_list[day].append(len(direct_dict) + len(direct_dict) + get_id(direct_dict, aa))
+                        #direct_val_list[day].append(1)
+                        direct_val_list[day].append(bb)
                 if a == '新增资源位':
                     b = b.split('-')
                     aa = b[0]
                     bb = b[2]
                     bb = float(bb) / 100.0
-                    if aa == '23':
-                        pos_type_list[day].append(0)
-                        pos_val_list[day].append(bb)
-                    if aa == '24':
-                        pos_type_list[day].append(1)
-                        pos_val_list[day].append(bb)
-                    if aa == '25':
-                        pos_type_list[day].append(2)
-                        pos_val_list[day].append(bb)
+                    if len(pos_type_list[day]) < 100:
+                        if aa == '23':
+                            pos_type_list[day].append(0)
+                            #pos_val_list[day].append(1)
+                            pos_val_list[day].append(bb)
+                        if aa == '24':
+                            pos_type_list[day].append(1)
+                            #pos_val_list[day].append(1)
+                            pos_val_list[day].append(bb)
+                        if aa == '25':
+                            pos_type_list[day].append(2)
+                            #pos_val_list[day].append(1)
+                            pos_val_list[day].append(bb)
                 if a == '修改资源位':
                     a, b = b.split('->')
                     aa = a.split('-')[0]
@@ -276,29 +281,37 @@ def getData(
                     cc = b.split('-')[0]
                     bb = float(bb) / 100.0
                     cc = float(cc) / 100.0
-                    if aa == '23':
-                        pos_type_list[day].append(3)
-                        pos_val_list[day].append(cc - bb)
-                    if aa == '24':
-                        pos_type_list[day].append(4)
-                        pos_val_list[day].append(cc - bb)
-                    if aa == '25':
-                        pos_type_list[day].append(5)
-                        pos_val_list[day].append(cc - bb)
-                #if a == '移除资源位':
-                #    b = b.split('-')
-                #    aa = b[0]
-                #    bb = b[2]
-                #    bb = float(bb) / 100.0
-                #    if aa == '23':
-                #        pos_type_list[day].append(6)
-                #        pos_val_list[day].append(bb)
-                #    if aa == '24':
-                #        pos_type_list[day].append(7)
-                #        pos_val_list[day].append(bb)
-                #    if aa == '25':
-                #        pos_type_list[day].append(8)
-                #        pos_val_list[day].append(bb)
+                    if len(pos_type_list[day]) < 100:
+                        if aa == '23':
+                            pos_type_list[day].append(3)
+                            #pos_val_list[day].append(1)
+                            pos_val_list[day].append(cc - bb)
+                        if aa == '24':
+                            pos_type_list[day].append(4)
+                            #pos_val_list[day].append(1)
+                            pos_val_list[day].append(cc - bb)
+                        if aa == '25':
+                            pos_type_list[day].append(5)
+                            #pos_val_list[day].append(1)
+                            pos_val_list[day].append(cc - bb)
+                if a == '移除资源位':
+                    b = b.split('-')
+                    aa = b[0]
+                    bb = b[2]
+                    bb = float(bb) / 100.0
+                    if len(pos_type_list[day]) < 100:
+                        if aa == '23':
+                            pos_type_list[day].append(6)
+                            #pos_val_list[day].append(1)
+                            pos_val_list[day].append(bb)
+                        if aa == '24':
+                            pos_type_list[day].append(7)
+                            #pos_val_list[day].append(1)
+                            pos_val_list[day].append(bb)
+                        if aa == '25':
+                            pos_type_list[day].append(8)
+                            #pos_val_list[day].append(1)
+                            pos_val_list[day].append(bb)
         data.append(direct_type_list)
         data.append(direct_val_list)
         data.append(pos_type_list)

@@ -3,7 +3,7 @@ import numpy as np
 import random
 class dataIterator:
     def __init__(self, source,
-                 batch_size=128,
+                 batch_size=32,
                  shuffle_each_epoch=True,
     ):
         random.seed(233)
@@ -36,4 +36,8 @@ class dataIterator:
             self.tmp += 1
             if self.tmp >= self.batch_size:
                 break
+        if len(raw_data) == 0:
+            self.end_of_data = False
+            self.reset()
+            raise StopIteration
         return raw_data
