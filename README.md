@@ -13,6 +13,4 @@ Dice.py: dice and prelu functions.
 
 utils.py: attentions in DIN and other auxiliary functions.
 
-Anonymous Adveriser Dataset is in an information security checking procedure and will be available once it passes the checking.
-
 Tensorflow 1.9 is used in our experiments.
